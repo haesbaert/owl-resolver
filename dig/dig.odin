@@ -37,7 +37,7 @@ main :: proc() {
 	err: Error
 	wbuf: []byte
 	buf: [2048]byte
-	ep: net.Endpoint
+	ep, ep2: net.Endpoint
 	n: int
 
 	if len(os.args) != 3 {
@@ -76,9 +76,12 @@ main :: proc() {
 	}
 	delete(wbuf)
 
-	n, ep, err = net.recv_udp(sock, buf[:])
+	n, ep2, err = net.recv_udp(sock, buf[:])
 	if err != nil {
 		fatal(err, "recv_udp")
+	}
+	if ep != ep2 {
+		fatalx("bad src address")
 	}
 
 	err = dns.from_bytes(buf[:], &pkt)
