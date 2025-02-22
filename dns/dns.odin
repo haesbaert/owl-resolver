@@ -395,33 +395,107 @@ serialize_packet :: proc(pkt: ^Packet) -> (buf: []byte, err: Error) {
 	defer if err != nil {
 		bytes.buffer_destroy(&b)
 	}
-	for q in pkt.qd {
-		for l in q.name {
-			bytes.buffer_write_byte(&b, byte(len(l))) or_return /* XXX check if valid */
-			n = bytes.buffer_write(&b, l) or_return
-			if n != len(l) {
-				err = .Short_Write
-				return
-			}
-		}
-		bytes.buffer_write_byte(&b, 0) or_return /* XXX check if valid */
-
-		v := u16be(q.type.(RR_Type_Known)) /* XXX */
-		n = bytes.buffer_write_ptr(&b, rawptr(&v), size_of(v)) or_return
-		if n != 2 {
-			err = .Short_Write
-			return
-		}
-
-		v = u16be(q.class)
-		n = bytes.buffer_write_ptr(&b, rawptr(&v), size_of(v)) or_return
-		if n != 2 {
-			err = .Short_Write
-			return
-		}
+	for &q in pkt.qd {
+		serialize_rr_set(&b, &q) or_return
+	}
+	for rr in pkt.an {
+		serialize_rr(&b, rr)
+	}
+	for rr in pkt.ns {
+		serialize_rr(&b, rr)
+	}
+	for rr in pkt.ar {
+		serialize_rr(&b, rr)
 	}
 
 	buf = b.buf[:]
+
+	return
+}
+
+serialize_rr :: proc(b: ^bytes.Buffer, rr: ^RR) -> (err: Error) {
+	n: int
+
+	serialize_rr_set(b, &rr.rr_set) or_return
+
+	switch rr in rr.variant {
+	case ^RR_A:
+		n = bytes.buffer_write(b, rr.addr4[:]) or_return
+		check_short_write(n == 4) or_return
+	case ^RR_NS:
+		serialize_domain_name(b, rr.domain) or_return
+	case ^RR_CNAME:
+		serialize_domain_name(b, rr.domain) or_return
+	case ^RR_PTR:
+		serialize_domain_name(b, rr.domain) or_return
+	case ^RR_HINFO:
+		serialize_dns_string(b, rr.cpu)
+		serialize_dns_string(b, rr.os)
+	case ^RR_MX:
+		serialize_domain_name(b, rr.exchange) or_return
+	case ^RR_TXT:
+		serialize_dns_string(b, rr.data)
+	case ^RR_AAAA:
+		n = bytes.buffer_write(b, rr.addr6[:]) or_return
+		check_short_write(n == 16) or_return
+	case ^RR_SRV:
+		serialize_domain_name(b, rr.target) or_return
+	case ^RR_OTHER:
+		err = .Bad_Resource_Record
+	}
+	return
+}
+
+serialize_rr_set :: proc(b: ^bytes.Buffer, rr_set: ^RR_Set) -> (err: Error) {
+	n: int
+
+	serialize_domain_name(b, rr_set.name) or_return
+
+	vk, ok := rr_set.type.(RR_Type_Known)
+	if !ok {
+		err = .Bad_Packet
+		return
+	}
+	v := u16be(vk)
+	n = bytes.buffer_write_ptr(b, rawptr(&v), size_of(v)) or_return
+	check_short_write(n == 2) or_return
+
+	v = u16be(rr_set.class)
+	n = bytes.buffer_write_ptr(b, rawptr(&v), size_of(v)) or_return
+	check_short_write(n == 2) or_return
+
+	return
+}
+
+serialize_domain_name :: proc(b: ^bytes.Buffer, domain: Domain_Name) -> (err: Error) {
+	n: int
+
+	if len(domain) == 0 {
+		err = .Bad_Domain
+		return
+	}
+	for l in domain {
+		if len(l) > MAX_LABEL_LEN {
+			err = .Bad_Label
+			return
+		}
+		bytes.buffer_write_byte(b, byte(len(l))) or_return
+		n = bytes.buffer_write(b, l) or_return
+		check_short_write(n == len(l)) or_return
+	}
+	bytes.buffer_write_byte(b, 0) or_return
+
+	return
+}
+
+serialize_dns_string :: proc(b: ^bytes.Buffer, s: Dns_String) -> (err: Error) {
+	if len(s) > MAX_DOMAIN_NAME_LEN {
+		err = .Bad_String_Len
+		return
+	}
+
+	bytes.buffer_write_byte(b, byte(len(s))) or_return
+	bytes.buffer_write(b, s) or_return
 
 	return
 }
@@ -491,4 +565,8 @@ destroy_domain_name :: proc(domain: ^Domain_Name) {
 	}
 	delete(domain^)
 	domain^ = nil
+}
+
+check_short_write :: proc(good: bool) -> io.Error {
+	return good ? nil : .Short_Write
 }

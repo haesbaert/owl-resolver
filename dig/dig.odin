@@ -53,7 +53,7 @@ main :: proc() {
 	if err != nil {
 		fatal(err, "make_simple_query")
 	}
-	fmt.println("query", pkt)
+	fmt.printf("--> QUERY\n%#v\n", pkt)
 
 	wbuf, err = dns.serialize_packet(&pkt)
 	if err != nil {
@@ -84,7 +84,7 @@ main :: proc() {
 	if err != nil {
 		fatal(err, "from_bytes")
 	}
-	fmt.println("reply", pkt)
+	fmt.printf("--> REPLY\n%#v\n", pkt)
 	dns.destroy_packet(&pkt)
 
 	net.close(sock)

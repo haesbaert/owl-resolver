@@ -8,11 +8,13 @@ import "core:math/bits"
 
 Dns_Error :: enum u32 {
 	None,
-	Bad_Label,
-	Bad_String_Len,
 	Bad_Compression,
+	Bad_Domain,
+	Bad_Label,
+	Bad_Packet,
 	Bad_Resource_Data_Len,
 	Bad_Resource_Record,
+	Bad_String_Len,
 }
 
 Error :: union #shared_nil {
