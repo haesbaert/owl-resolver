@@ -81,7 +81,7 @@ parse_type :: proc(r: ^bytes.Reader, v: ^RR_Type) -> (err: Error) {
 	case .AAAA:
 	case .SRV:
 	case .Invalid:
-		return .Invalid_Resource_Record
+		return .Bad_Resource_Record
 	case:
 		v^ = vu
 	}
@@ -217,7 +217,7 @@ parse_rr :: proc(r: ^bytes.Reader) -> (rr: ^RR, err: Error) {
 	case .SRV:
 		rr = new_rr(RR_SRV) or_return
 	case .Invalid:
-		return nil, .Invalid_Resource_Record
+		return nil, .Bad_Resource_Record
 	case:
 		rr = new_rr(RR_OTHER) or_return
 	}
@@ -229,7 +229,7 @@ parse_rr :: proc(r: ^bytes.Reader) -> (rr: ^RR, err: Error) {
 	switch rr in rr.variant {
 	case ^RR_A:
 		if rr.rd_len != 4 {
-			return nil, .Invalid_Resource_Data_Len
+			return nil, .Bad_Resource_Data_Len
 		}
 		parse_bytes(r, rr.addr4[:]) or_return
 	case ^RR_NS:
@@ -248,7 +248,7 @@ parse_rr :: proc(r: ^bytes.Reader) -> (rr: ^RR, err: Error) {
 		parse_dns_string(r, &rr.data) or_return
 	case ^RR_AAAA:
 		if rr.rd_len != 16 {
-			return nil, .Invalid_Resource_Data_Len
+			return nil, .Bad_Resource_Data_Len
 		}
 		parse_bytes(r, rr.addr6[:]) or_return
 	case ^RR_SRV:
@@ -267,7 +267,7 @@ parse_rr :: proc(r: ^bytes.Reader) -> (rr: ^RR, err: Error) {
 parse_dns_string :: proc(r: ^bytes.Reader, data: ^Dns_String) -> (err: Error) {
 	n := bytes.reader_read_byte(r) or_return
 	if n > MAX_DOMAIN_NAME_LEN {
-		return .Invalid_String_Len
+		return .Bad_String_Len
 	}
 	if n == 0 {
 		return nil
