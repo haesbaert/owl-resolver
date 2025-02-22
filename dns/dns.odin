@@ -5,9 +5,11 @@ package dns
 import "base:runtime"
 import "core:bytes"
 import "core:encoding/endian"
-//import "core:fmt"
+import "core:fmt"
 import "core:io"
+import "core:math/rand"
 import "core:mem"
+import "core:strings"
 
 parse :: proc {
 	parse_packet,
@@ -333,12 +335,95 @@ parse_packet :: proc(r: ^bytes.Reader, pkt: ^Packet) -> (err: Error) {
 	return
 }
 
+gen_id :: proc() -> u16be {
+	return u16be(rand.uint32()) /* XXX check random source */
+}
+
 from_bytes :: proc(buf: []byte, pkt: ^Packet) -> Error {
 	r: bytes.Reader
 
 	bytes.reader_init(&r, buf)
 
 	return parse_packet(&r, pkt)
+}
+
+/* XXX doesn't handle escaped dots */
+domain_from_ascii :: proc(s: string, domain: ^Domain_Name) -> (err: Error) {
+	s := s
+
+	defer if err != nil {
+		destroy_domain_name(domain)
+	}
+
+	for l in strings.split_by_byte_iterator(&s, '.') {
+		lcopy := strings.clone(l) or_return
+
+		_, err = append(domain, transmute([]byte)lcopy)
+		if err != nil {
+			delete(lcopy)
+			return
+		}
+	}
+
+	return
+}
+
+make_simple_query :: proc(name: string, pkt: ^Packet) -> (err: Error) {
+	defer if err != nil {
+		destroy_packet(pkt)
+	}
+
+	pkt.header.id = gen_id()
+	pkt.header.set.rd = true
+
+	pkt.qd = make([]Question, 1) or_return
+	q := &pkt.qd[0]
+	q.type = .A
+	q.class = .IN
+	domain_from_ascii(name, &q.name) or_return
+
+	pkt.header.qd_count = u16be(len(pkt.qd))
+
+	return
+}
+
+serialize_packet :: proc(pkt: ^Packet) -> (buf: []byte, err: Error) {
+	b: bytes.Buffer
+	n: int
+
+	bytes.buffer_init(&b, mem.ptr_to_bytes(&pkt.header))
+	defer if err != nil {
+		bytes.buffer_destroy(&b)
+	}
+	for q in pkt.qd {
+		for l in q.name {
+			bytes.buffer_write_byte(&b, byte(len(l))) or_return /* XXX check if valid */
+			n = bytes.buffer_write(&b, l) or_return
+			if n != len(l) {
+				err = .Short_Write
+				return
+			}
+		}
+		bytes.buffer_write_byte(&b, 0) or_return /* XXX check if valid */
+
+		v := u16be(q.type.(RR_Type_Known)) /* XXX */
+		n = bytes.buffer_write_ptr(&b, rawptr(&v), size_of(v)) or_return
+		if n != 2 {
+			err = .Short_Write
+			return
+		}
+
+		v = u16be(q.class)
+		n = bytes.buffer_write_ptr(&b, rawptr(&v), size_of(v)) or_return
+		if n != 2 {
+			err = .Short_Write
+			return
+		}
+	}
+
+	buf = b.buf[:]
+
+	return
 }
 
 destroy_packet :: proc(pkt: ^Packet) {
