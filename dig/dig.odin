@@ -59,6 +59,7 @@ main :: proc() {
 	if err != nil {
 		fatal(err, "serialize_packet")
 	}
+	xid := pkt.header.id
 	dns.destroy_packet(&pkt)
 
 	sock, err = net.make_unbound_udp_socket(.IP4)
@@ -85,8 +86,22 @@ main :: proc() {
 		fatal(err, "from_bytes")
 	}
 	fmt.printf("--> REPLY\n%#v\n", pkt)
-	dns.destroy_packet(&pkt)
 
+	if xid != pkt.header.id {
+		fatalx("bad xid")
+	}
+	if len(pkt.an) == 0 {
+		fatalx("no answer")
+	}
+	for an in pkt.an {
+		#partial switch rr in an.variant {
+		case ^dns.RR_A:
+			/* XXX temp allocator */
+			fmt.printf("%s\n", net.to_string(net.IP4_Address(rr.addr4)))
+		}
+	}
+
+	dns.destroy_packet(&pkt)
 	net.close(sock)
 	delete(os.args)
 }
