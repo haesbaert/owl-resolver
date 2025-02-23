@@ -4,10 +4,10 @@ package dns
 
 import "base:runtime"
 import "core:bytes"
+import "core:crypto"
 import "core:encoding/endian"
 import "core:fmt"
 import "core:io"
-import "core:math/rand"
 import "core:mem"
 import "core:strings"
 
@@ -335,8 +335,9 @@ parse_packet :: proc(r: ^bytes.Reader, pkt: ^Packet) -> (err: Error) {
 	return
 }
 
-gen_id :: proc() -> u16be {
-	return u16be(rand.uint32()) /* XXX check random source */
+gen_id :: proc() -> (v: u16be) {
+	crypto.rand_bytes(mem.ptr_to_bytes(&v))
+	return
 }
 
 from_bytes :: proc(buf: []byte, pkt: ^Packet) -> Error {
