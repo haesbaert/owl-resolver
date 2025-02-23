@@ -12,14 +12,30 @@ import "core:sys/posix"
 
 import dns "../dns"
 
+Dig_Error :: enum u32 {
+	None,
+	Bad_Source_Address,
+	Bad_Id,
+}
+
 Error :: union #shared_nil {
+	Dig_Error,
 	dns.Error,
+	dns.Rcode,
 	io.Error,
 	os.Error,
 	net.Network_Error,
 	net.Dial_Error,
 	posix.Errno,
 	runtime.Allocator_Error,
+}
+
+Query :: struct {
+	name:  string,
+	type:  dns.RR_Type,
+	query: dns.Packet,
+	reply: dns.Packet,
+	sock:  net.UDP_Socket,
 }
 
 fatal :: proc(err: Error, s: string, args: ..any) {
@@ -53,34 +69,105 @@ wait_reply :: proc(sock: net.UDP_Socket) -> (err: Error) {
 	return
 }
 
+send_query :: proc(
+	name: string,
+	qtype: dns.RR_Type,
+	ep: net.Endpoint,
+	sock: net.UDP_Socket,
+) -> (
+	err: Error,
+) {
+	query, reply: dns.Packet
+	src: net.Endpoint
+	recvbuf: [2048]byte
 
-make_query :: proc(name: string, qtype: dns.RR_Type, pkt: ^dns.Packet) -> (err: Error) {
-	defer if err != nil {
-		dns.destroy_packet(pkt)
+	defer {
+		dns.destroy_packet(&query)
+		dns.destroy_packet(&reply)
 	}
 
-	pkt.header.id = dns.gen_id()
-	pkt.header.set.rd = true
+	query.header.id = dns.gen_id()
+	query.header.set.rd = true
 
-	pkt.qd = make([]dns.Question, 1) or_return
-	q := &pkt.qd[0]
+	query.qd = make([]dns.Question, 1) or_return
+	q := &query.qd[0]
 	q.type = qtype
 	q.class = .IN
 	dns.domain_from_ascii(name, &q.name) or_return
 
-	pkt.header.qd_count = u16be(len(pkt.qd))
+	query.header.qd_count = u16be(len(query.qd))
+
+	sendbuf := dns.serialize_packet(&query) or_return
+	defer delete(sendbuf)
+	n := net.send_udp(sock, sendbuf, ep) or_return
+	if n != len(sendbuf) {
+		err = io.Error(.Short_Write)
+		return
+	}
+
+	wait_reply(sock) or_return
+	n, src = net.recv_udp(sock, recvbuf[:]) or_return
+	if src != ep {
+		err = .Bad_Source_Address
+		return
+	}
+	dns.parse(recvbuf[:], &reply) or_return
+	if query.header.id != reply.header.id {
+		err = .Bad_Id
+		return
+	}
+	err = dns.Rcode(reply.header.set.rcode)
+	if err != nil {
+		return
+	}
+	for an in reply.an {
+		#partial switch rr in an.variant {
+		case ^dns.RR_A:
+			/* XXX temp allocator */
+			fmt.printf("A\t%s\n", net.to_string(net.IP4_Address(rr.addr4)))
+		case ^dns.RR_AAAA:
+			/* XXX temp allocator */
+			fmt.printf("AAAA\t%s\n", net.to_string(transmute(net.IP6_Address)(rr.addr6)))
+		case ^dns.RR_MX:
+			fmt.printf("MX\t%s (%v)\n", rr.exchange, rr.preference)
+		}
+	}
+
+	return
+}
+
+main_ :: proc(name: string, ep: net.Endpoint) -> (err: Error) {
+	sock := net.make_unbound_udp_socket(.IP4) or_return
+	defer net.close(sock)
+
+	a_err := send_query(name, .A, ep, sock)
+	aaaa_err := send_query(name, .AAAA, ep, sock)
+	mx_err := send_query(name, .MX, ep, sock)
+
+	if a_err != nil {
+		fmt.fprintf(os.stderr, "A\t%v\n", a_err)
+	}
+	if aaaa_err != nil {
+		fmt.fprintf(os.stderr, "AAAA\t%v\n", aaaa_err)
+	}
+	if mx_err != nil {
+		fmt.fprintf(os.stderr, "MX\t%v\n", mx_err)
+	}
+
+	switch {
+	case a_err != nil:
+		return a_err
+	case aaaa_err != nil:
+		return aaaa_err
+	case mx_err != nil:
+		return mx_err
+	}
 
 	return
 }
 
 main :: proc() {
-	sock: net.UDP_Socket
-	pkt: dns.Packet
-	err: Error
-	wbuf: []byte
-	buf: [2048]byte
-	ep, ep2: net.Endpoint
-	n: int
+	ep: net.Endpoint
 
 	if len(os.args) != 3 {
 		fatalx("usage: dig forward-addr name")
@@ -91,67 +178,10 @@ main :: proc() {
 		fatalx("invalid address %s", os.args[1])
 	}
 
-	err = make_query(os.args[2], .A, &pkt)
+	err := main_(os.args[2], ep)
 	if err != nil {
-		fatal(err, "make_simple_query")
-	}
-	/* fmt.printf("--> QUERY\n%#v\n", pkt) */
-
-	wbuf, err = dns.serialize_packet(&pkt)
-	if err != nil {
-		fatal(err, "serialize_packet")
-	}
-	xid := pkt.header.id
-	dns.destroy_packet(&pkt)
-
-	sock, err = net.make_unbound_udp_socket(.IP4)
-	if err != nil {
-		fatal(err, "make_unbound_udp_socket")
+		fatal(err, "%s", os.args[2])
 	}
 
-	n, err = net.send_udp(sock, wbuf, ep)
-	if err != nil {
-		fatal(err, "send_udp")
-	}
-	if n != len(wbuf) {
-		fatal(io.Error(.Short_Write), "send_udp")
-	}
-	delete(wbuf)
-
-	err = wait_reply(sock)
-	if err != nil {
-		fatal(err, "wait_reply")
-	}
-
-	n, ep, err = net.recv_udp(sock, buf[:])
-	if err != nil {
-		fatal(err, "recv_udp")
-	}
-	if ep != ep2 {
-		fatalx("bad src address")
-	}
-
-	err = dns.from_bytes(buf[:], &pkt)
-	if err != nil {
-		fatal(err, "from_bytes")
-	}
-	/* fmt.printf("--> REPLY\n%#v\n", pkt) */
-
-	if xid != pkt.header.id {
-		fatalx("bad xid")
-	}
-	if len(pkt.an) == 0 {
-		fatalx("no answer")
-	}
-	for an in pkt.an {
-		#partial switch rr in an.variant {
-		case ^dns.RR_A:
-			/* XXX temp allocator */
-			fmt.printf("%s\n", net.to_string(net.IP4_Address(rr.addr4)))
-		}
-	}
-
-	dns.destroy_packet(&pkt)
-	net.close(sock)
 	delete(os.args)
 }

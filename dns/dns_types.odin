@@ -72,6 +72,15 @@ when ODIN_ENDIAN == .Big {
 
 Question :: RR_Set
 
+Rcode :: enum u8 {
+	No_Error = 0,
+	Format_Error = 1,
+	Server_Failure = 2,
+	Nxdomain = 3,
+	Not_Implemented = 4,
+	Refused = 5,
+}
+
 /*
  * Resource Record definitions
  */
