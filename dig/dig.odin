@@ -2,10 +2,13 @@
 
 package main
 
+import "base:runtime"
+
 import "core:fmt"
 import "core:io"
 import "core:net"
 import "core:os"
+import "core:sys/posix"
 
 import dns "../dns"
 
@@ -14,8 +17,10 @@ Error :: union #shared_nil {
 	io.Error,
 	os.Error,
 	net.Network_Error,
+	net.Dial_Error,
+	posix.Errno,
+	runtime.Allocator_Error,
 }
-
 
 fatal :: proc(err: Error, s: string, args: ..any) {
 	fmt.fprintf(os.stderr, s, ..args)
@@ -29,6 +34,43 @@ fatalx :: proc(s: string, args: ..any) {
 	fmt.fprint(os.stderr, '\n')
 
 	os.exit(1)
+}
+
+wait_reply :: proc(sock: net.UDP_Socket) -> (err: Error) {
+	pollfd: posix.pollfd
+	buffer: [2048]byte
+
+	pollfd.fd = posix.FD(sock)
+	pollfd.events = {.IN}
+
+	if r := posix.poll(&pollfd, 1, 5000); r == -1 {
+		return posix.errno()
+	}
+	if .IN not_in pollfd.revents {
+		err = net.Dial_Error(.Timeout) /* XXX */
+	}
+
+	return
+}
+
+
+make_query :: proc(name: string, qtype: dns.RR_Type, pkt: ^dns.Packet) -> (err: Error) {
+	defer if err != nil {
+		dns.destroy_packet(pkt)
+	}
+
+	pkt.header.id = dns.gen_id()
+	pkt.header.set.rd = true
+
+	pkt.qd = make([]dns.Question, 1) or_return
+	q := &pkt.qd[0]
+	q.type = qtype
+	q.class = .IN
+	dns.domain_from_ascii(name, &q.name) or_return
+
+	pkt.header.qd_count = u16be(len(pkt.qd))
+
+	return
 }
 
 main :: proc() {
@@ -49,11 +91,11 @@ main :: proc() {
 		fatalx("invalid address %s", os.args[1])
 	}
 
-	err = dns.make_simple_query(os.args[2], &pkt)
+	err = make_query(os.args[2], .A, &pkt)
 	if err != nil {
 		fatal(err, "make_simple_query")
 	}
-	fmt.printf("--> QUERY\n%#v\n", pkt)
+	/* fmt.printf("--> QUERY\n%#v\n", pkt) */
 
 	wbuf, err = dns.serialize_packet(&pkt)
 	if err != nil {
@@ -76,7 +118,12 @@ main :: proc() {
 	}
 	delete(wbuf)
 
-	n, ep2, err = net.recv_udp(sock, buf[:])
+	err = wait_reply(sock)
+	if err != nil {
+		fatal(err, "wait_reply")
+	}
+
+	n, ep, err = net.recv_udp(sock, buf[:])
 	if err != nil {
 		fatal(err, "recv_udp")
 	}
@@ -88,7 +135,7 @@ main :: proc() {
 	if err != nil {
 		fatal(err, "from_bytes")
 	}
-	fmt.printf("--> REPLY\n%#v\n", pkt)
+	/* fmt.printf("--> REPLY\n%#v\n", pkt) */
 
 	if xid != pkt.header.id {
 		fatalx("bad xid")

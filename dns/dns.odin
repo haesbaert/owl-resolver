@@ -369,25 +369,6 @@ domain_from_ascii :: proc(s: string, domain: ^Domain_Name) -> (err: Error) {
 	return
 }
 
-make_simple_query :: proc(name: string, pkt: ^Packet) -> (err: Error) {
-	defer if err != nil {
-		destroy_packet(pkt)
-	}
-
-	pkt.header.id = gen_id()
-	pkt.header.set.rd = true
-
-	pkt.qd = make([]Question, 1) or_return
-	q := &pkt.qd[0]
-	q.type = .A
-	q.class = .IN
-	domain_from_ascii(name, &q.name) or_return
-
-	pkt.header.qd_count = u16be(len(pkt.qd))
-
-	return
-}
-
 serialize_packet :: proc(pkt: ^Packet) -> (buf: []byte, err: Error) {
 	b: bytes.Buffer
 	n: int
