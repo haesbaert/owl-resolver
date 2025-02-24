@@ -123,10 +123,8 @@ send_query :: proc(
 	for an in reply.an {
 		#partial switch rr in an.variant {
 		case ^dns.RR_A:
-			/* XXX temp allocator */
 			fmt.printf("A\t%s\n", net.to_string(net.IP4_Address(rr.addr4)))
 		case ^dns.RR_AAAA:
-			/* XXX temp allocator */
 			fmt.printf("AAAA\t%s\n", net.to_string(transmute(net.IP6_Address)(rr.addr6)))
 		case ^dns.RR_MX:
 			fmt.printf("MX\t%s (%v)\n", rr.exchange, rr.preference)
@@ -183,5 +181,6 @@ main :: proc() {
 		fatal(err, "%s", os.args[2])
 	}
 
+	free_all(context.temp_allocator)
 	delete(os.args)
 }
