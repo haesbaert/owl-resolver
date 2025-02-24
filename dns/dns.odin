@@ -11,9 +11,9 @@ import "core:io"
 import "core:mem"
 import "core:strings"
 
-parse :: proc {
-	parse_packet,
-	from_bytes,
+parse_packet :: proc {
+	parse_packet_from_reader,
+	parse_packet_from_bytes,
 }
 
 parse_ptr_type :: proc(r: ^bytes.Reader, p: ^$T) -> io.Error {
@@ -298,7 +298,7 @@ parse_domain_name :: proc(r: ^bytes.Reader, domain: ^Domain_Name) -> (err: Error
 	return
 }
 
-parse_packet :: proc(r: ^bytes.Reader, pkt: ^Packet) -> (err: Error) {
+parse_packet_from_reader :: proc(r: ^bytes.Reader, pkt: ^Packet) -> (err: Error) {
 	if bytes.reader_length(r) < size_of(Packet_Header) {
 		return .Short_Buffer
 	}
@@ -344,12 +344,12 @@ gen_id :: proc() -> (v: u16be) {
 	return
 }
 
-from_bytes :: proc(buf: []byte, pkt: ^Packet) -> Error {
+parse_packet_from_bytes :: proc(buf: []byte, pkt: ^Packet) -> Error {
 	r: bytes.Reader
 
 	bytes.reader_init(&r, buf)
 
-	return parse_packet(&r, pkt)
+	return parse_packet_from_reader(&r, pkt)
 }
 
 /* XXX doesn't handle escaped dots */

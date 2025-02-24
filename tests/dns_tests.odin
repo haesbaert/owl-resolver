@@ -35,7 +35,7 @@ do_parsing :: proc(t: ^testing.T, buf: []byte) {
 
 	processed := 0
 	for pcap_pkt, i in pcap_pkts {
-		dns_err := dns.parse(pcap_pkt.data[42:], &pkt)
+		dns_err := dns.parse_packet(pcap_pkt.data[42:], &pkt)
 		expectf(t, dns_err == nil, "%v", dns_err)
 		check_pkt_nr(t, &pkt, i + 1) /* i + 1 matches the "No." column in wireshark */
 		dns.destroy_packet(&pkt)
@@ -135,7 +135,7 @@ do_zlip :: proc(t: ^testing.T, zlip: []byte) {
 	pcap_pkt, err = pcap.next_packet(handle)
 	expect(t, err == nil)
 
-	dns_err := dns.parse(pcap_pkt.data[42:], &pkt)
+	dns_err := dns.parse_packet(pcap_pkt.data[42:], &pkt)
 	expect(t, dns_err == .Bad_Label)
 	pcap.close(handle)
 }
