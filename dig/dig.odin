@@ -6,6 +6,7 @@ import "base:runtime"
 
 import "core:fmt"
 import "core:io"
+import "core:mem"
 import "core:net"
 import "core:os"
 import "core:sys/posix"
@@ -167,6 +168,28 @@ main_ :: proc(name: string, ep: net.Endpoint) -> (err: Error) {
 main :: proc() {
 	ep: net.Endpoint
 
+	when ODIN_DEBUG {
+		track: mem.Tracking_Allocator
+		mem.tracking_allocator_init(&track, context.allocator)
+		context.allocator = mem.tracking_allocator(&track)
+
+		defer {
+			if len(track.allocation_map) > 0 {
+				fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
+				for _, entry in track.allocation_map {
+					fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
+				}
+			}
+			if len(track.bad_free_array) > 0 {
+				fmt.eprintf("=== %v incorrect frees: ===\n", len(track.bad_free_array))
+				for entry in track.bad_free_array {
+					fmt.eprintf("- %p @ %v\n", entry.memory, entry.location)
+				}
+			}
+			mem.tracking_allocator_destroy(&track)
+		}
+	}
+
 	if len(os.args) != 3 {
 		fatalx("usage: dig forward-addr name")
 	}
@@ -182,5 +205,5 @@ main :: proc() {
 	}
 
 	free_all(context.temp_allocator)
-	delete(os.args)
+	delete(os.args, runtime.default_allocator())
 }
