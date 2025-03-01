@@ -5,8 +5,6 @@ package dns
 import "base:runtime"
 import "core:io"
 import "core:math/bits"
-import "core:net"
-import "core:os"
 
 Dns_Error :: enum u32 {
 	None,
@@ -14,7 +12,6 @@ Dns_Error :: enum u32 {
 	Bad_Domain,
 	Bad_Label,
 	Bad_Packet,
-	Bad_Resolv,
 	Bad_Resource_Data_Len,
 	Bad_Resource_Record,
 	Bad_String_Len,
@@ -25,7 +22,6 @@ Error :: union #shared_nil {
 	runtime.Allocator_Error,
 	Dns_Error,
 	io.Error,
-	os.Error,
 }
 
 /*
@@ -78,12 +74,12 @@ when ODIN_ENDIAN == .Big {
 Question :: RR_Set
 
 Rcode :: enum u8 {
-	No_Error        = 0,
-	Format_Error    = 1,
-	Server_Failure  = 2,
-	Nxdomain        = 3,
+	No_Error = 0,
+	Format_Error = 1,
+	Server_Failure = 2,
+	Nxdomain = 3,
 	Not_Implemented = 4,
-	Refused         = 5,
+	Refused = 5,
 }
 
 /*
@@ -195,13 +191,3 @@ Dns_String :: []byte
 
 MAX_LABEL_LEN :: 63
 MAX_DOMAIN_NAME_LEN :: 255
-
-/*
- * Non-wire specific
- */
-
-Resolv_Conf :: struct {
-	nameservers: []net.Address,
-	search:      string,
-	options:     []string,
-}

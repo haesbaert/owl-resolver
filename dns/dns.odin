@@ -3,15 +3,12 @@
 package dns
 
 import "base:runtime"
-import "core:bufio"
 import "core:bytes"
 import "core:crypto"
 import "core:encoding/endian"
 import "core:fmt"
 import "core:io"
 import "core:mem"
-import "core:net"
-import "core:os"
 import "core:strings"
 
 parse :: proc {
@@ -22,7 +19,7 @@ parse :: proc {
 parse_ptr_type :: proc(r: ^bytes.Reader, p: ^$T) -> io.Error {
 	n, err := bytes.reader_read(r, mem.ptr_to_bytes(p))
 	if err == .EOF {
-		return io.Error.Unexpected_EOF
+		return .Unexpected_EOF
 	}
 	if (err == nil && n != size_of(p^)) {
 		return .Short_Buffer
@@ -31,7 +28,7 @@ parse_ptr_type :: proc(r: ^bytes.Reader, p: ^$T) -> io.Error {
 	return err
 }
 
-parse_bytes :: proc(r: ^bytes.Reader, p: []byte) -> io.Error {
+parse_bytes :: proc(r: ^bytes.Reader, p: []byte) -> Error {
 	n, err := bytes.reader_read(r, p)
 	if err == .EOF {
 		return .Unexpected_EOF
@@ -43,7 +40,7 @@ parse_bytes :: proc(r: ^bytes.Reader, p: []byte) -> io.Error {
 	return nil
 }
 
-parse_u16 :: proc(r: ^bytes.Reader, v: ^u16) -> io.Error {
+parse_u16 :: proc(r: ^bytes.Reader, v: ^u16) -> Error {
 	ok: bool
 	v^, ok = endian.get_u16(r.s[r.i:], .Big)
 	if !ok {
@@ -57,7 +54,7 @@ parse_u16 :: proc(r: ^bytes.Reader, v: ^u16) -> io.Error {
 }
 
 /* TODO unify both */
-parse_u32 :: proc(r: ^bytes.Reader, v: ^u32) -> io.Error {
+parse_u32 :: proc(r: ^bytes.Reader, v: ^u32) -> Error {
 	ok: bool
 	v^, ok = endian.get_u32(r.s[r.i:], .Big)
 	if !ok {
@@ -272,14 +269,14 @@ parse_dns_string :: proc(r: ^bytes.Reader, data: ^Dns_String) -> (err: Error) {
 		return nil
 	}
 	if bytes.reader_length(r) < int(n) {
-		return io.Error.Short_Buffer
+		return .Short_Buffer
 	}
 	data^ = make([]byte, n) or_return
 	copied := bytes.reader_read(r, data^[:]) or_return
 	if copied != len(data^) {
 		delete(data^)
 		data^ = nil
-		return io.Error.Short_Buffer
+		return .Short_Buffer
 	}
 
 	return
@@ -299,7 +296,7 @@ parse_domain_name :: proc(r: ^bytes.Reader, domain: ^Domain_Name) -> (err: Error
 
 parse_packet :: proc(r: ^bytes.Reader, pkt: ^Packet) -> (err: Error) {
 	if bytes.reader_length(r) < size_of(Packet_Header) {
-		return io.Error.Short_Buffer
+		return .Short_Buffer
 	}
 	parse_ptr_type(r, &pkt.header) or_return
 
@@ -349,70 +346,6 @@ from_bytes :: proc(buf: []byte, pkt: ^Packet) -> Error {
 	bytes.reader_init(&r, buf)
 
 	return parse_packet(&r, pkt)
-}
-
-parse_resolv_dot_conf :: proc(path := "/etc/resolv.conf") -> (rc: Resolv_Conf, err: Error) {
-	r: bufio.Reader
-	fd: os.Handle
-	buffer: [1024]byte
-	line: string
-	nameservers: [dynamic]net.Address
-	search: string
-	options: [dynamic]string
-
-	fd = os.open(path) or_return
-	defer os.close(fd)
-	bufio.reader_init_with_buf(&r, os.stream_from_handle(fd), buffer[:])
-	defer bufio.reader_destroy(&r)
-
-	defer if err != nil {
-		delete(nameservers)
-		delete(search)
-		for opt in options {
-			delete(opt)
-		}
-		delete(options)
-	}
-
-	for {
-		line, err = bufio.reader_read_string(&r, '\n')
-		if err == io.Error.EOF {
-			err = nil
-			break
-		}
-		defer delete(line)
-		line = strings.trim_right(line, "\n")
-
-		switch {
-		case strings.starts_with(line, "nameserver "):
-			addr := net.parse_address(line[len("nameserver "):])
-			if addr == nil {
-				err = .Bad_Resolv
-				return
-			}
-			_ = append(&nameservers, addr) or_return
-		case strings.starts_with(line, "search "):
-			search = line[len("search "):]
-			if len(search) == 0 {
-				err = .Bad_Resolv
-				return
-			}
-			search = strings.clone(search) or_return
-		case strings.starts_with(line, "options "):
-			line2 := line[len("options "):]
-			for opt in strings.split_iterator(&line2, " \t") {
-				o := strings.clone(opt) or_return
-				_ = append(&options, o) or_return
-			}
-
-		}
-	}
-
-	rc.nameservers = nameservers[:]
-	rc.search = search
-	rc.options = options[:]
-
-	return
 }
 
 /* XXX doesn't handle escaped dots */
@@ -605,15 +538,6 @@ destroy_rr_set :: proc(rr_set: ^RR_Set) {
 destroy_domain_name :: proc(domain: ^Domain_Name) {
 	delete(domain^)
 	domain^ = nil
-}
-
-destroy_resolv_conf :: proc(rc: ^Resolv_Conf) {
-	for opt in rc.options {
-		delete(opt)
-	}
-	delete(rc.options)
-	delete(rc.search)
-	delete(rc.nameservers)
 }
 
 check_short_write :: proc(good: bool) -> io.Error {
