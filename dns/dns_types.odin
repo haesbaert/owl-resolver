@@ -15,6 +15,7 @@ Dns_Error :: enum u32 {
 	Bad_Resource_Data_Len,
 	Bad_Resource_Record,
 	Bad_String_Len,
+	Truncated,
 }
 
 Error :: union #shared_nil {

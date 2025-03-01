@@ -298,11 +298,15 @@ parse_packet :: proc(r: ^bytes.Reader, pkt: ^Packet) -> (err: Error) {
 	if bytes.reader_length(r) < size_of(Packet_Header) {
 		return .Short_Buffer
 	}
+	parse_ptr_type(r, &pkt.header) or_return
+
+	if pkt.header.set.tc {
+		err = .Truncated
+		return
+	}
 	defer if err != nil {
 		destroy_packet(pkt)
 	}
-
-	parse_ptr_type(r, &pkt.header) or_return
 
 	pkt.qd = make([]Question, pkt.header.qd_count) or_return
 	for &qst in pkt.qd {
