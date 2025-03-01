@@ -57,11 +57,16 @@ fatalx :: proc(s: string, args: ..any) {
 	os.exit(1)
 }
 
-wait_reply :: proc(sock: net.UDP_Socket) -> (err: Error) {
+wait_readable :: proc(sock: net.Any_Socket) -> (err: Error) {
 	pollfd: posix.pollfd
 	buffer: [2048]byte
 
-	pollfd.fd = posix.FD(sock)
+	switch t in sock {
+	case net.UDP_Socket:
+		pollfd.fd = posix.FD(t)
+	case net.TCP_Socket:
+		pollfd.fd = posix.FD(t)
+	}
 	pollfd.events = {.IN}
 
 	if r := posix.poll(&pollfd, 1, 5000); r == -1 {
@@ -170,7 +175,7 @@ query_via_udp :: proc(ep: net.Endpoint, query, reply: ^dns.Packet) -> (err: Erro
 		return
 	}
 
-	wait_reply(sock) or_return
+	wait_readable(sock) or_return
 
 	n, src = net.recv_udp(sock, recvbuf[:]) or_return
 	if src != ep {
@@ -217,6 +222,7 @@ query_via_tcp :: proc(ep: net.Endpoint, query, reply: ^dns.Packet) -> (err: Erro
 
 	read := 0
 	for read < 2 {
+		wait_readable(sock) or_return
 		n = net.recv_tcp(sock, recvbuf[read:]) or_return
 		if n == 0 {
 			return io.Error.Unexpected_EOF
@@ -228,10 +234,8 @@ query_via_tcp :: proc(ep: net.Endpoint, query, reply: ^dns.Packet) -> (err: Erro
 	if !ok {
 		return io.Error.Short_Buffer
 	}
-	/*
-	 * Eat the short and write remaining data over it
-	 */
 	for read < int(to_read) + 2 {
+		wait_readable(sock) or_return
 		n = net.recv_tcp(sock, recvbuf[read:]) or_return
 		if n == 0 {
 			return io.Error.Unexpected_EOF
