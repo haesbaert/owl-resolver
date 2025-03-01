@@ -5,6 +5,7 @@ package main
 import "base:runtime"
 
 import "core:bufio"
+import "core:encoding/endian"
 import "core:fmt"
 import "core:io"
 import "core:mem"
@@ -154,14 +155,14 @@ destroy_resolv_conf :: proc(rc: ^Resolv_Conf) {
 
 query_via_udp :: proc(ep: net.Endpoint, query, reply: ^dns.Packet) -> (err: Error) {
 	sock: net.UDP_Socket
-	recvbuf: [2048]byte
+	recvbuf: [2048]byte = ---
 	src: net.Endpoint
-
-	sock = net.make_unbound_udp_socket(.IP4) or_return
-	defer net.close(sock)
 
 	sendbuf := dns.serialize_packet(query) or_return
 	defer delete(sendbuf)
+
+	sock = net.make_unbound_udp_socket(.IP4) or_return
+	defer net.close(sock)
 
 	n := net.send_udp(sock, sendbuf, ep) or_return
 	if n != len(sendbuf) {
@@ -170,12 +171,75 @@ query_via_udp :: proc(ep: net.Endpoint, query, reply: ^dns.Packet) -> (err: Erro
 	}
 
 	wait_reply(sock) or_return
+
 	n, src = net.recv_udp(sock, recvbuf[:]) or_return
 	if src != ep {
 		err = .Bad_Source_Address
 		return
 	}
 	dns.parse(recvbuf[:], reply) or_return
+
+	return
+}
+
+query_via_tcp :: proc(ep: net.Endpoint, query, reply: ^dns.Packet) -> (err: Error) {
+	sock: net.TCP_Socket
+	recvbuf: [2048]byte = ---
+	iov: [2]posix.iovec
+	pkt_len: u16be
+
+	sendbuf := dns.serialize_packet(query) or_return
+	defer delete(sendbuf)
+
+	sock = net.dial_tcp(ep) or_return
+	defer net.close(sock)
+
+	/* net doesn't expose iovecs, so we do it ourselves */
+	pkt_len = u16be(len(sendbuf)) /* XXX deal with overflow */
+	iov[0].iov_base = &pkt_len
+	iov[0].iov_len = size_of(pkt_len)
+	iov[1].iov_base = raw_data(sendbuf)
+	iov[1].iov_len = len(sendbuf)
+
+	n := posix.writev(posix.FD(sock), raw_data(iov[:]), 2)
+	switch {
+	case n == -1:
+		return posix.errno()
+	case n < 2:
+		/* Bail if we couldn't write iov0, too much work to handle */
+		return io.Error.Short_Write
+	case n != (len(sendbuf) + 2):
+		written := n - 2
+		for written < len(sendbuf) {
+			n = net.send(sock, sendbuf[written:]) or_return
+			written += n
+		}
+	}
+
+	read := 0
+	for read < 2 {
+		n = net.recv_tcp(sock, recvbuf[read:]) or_return
+		if n == 0 {
+			return io.Error.Unexpected_EOF
+		}
+		read += n
+	}
+
+	to_read, ok := endian.get_u16(recvbuf[0:2], .Big)
+	if !ok {
+		return io.Error.Short_Buffer
+	}
+	/*
+	 * Eat the short and write remaining data over it
+	 */
+	for read < int(to_read) + 2 {
+		n = net.recv_tcp(sock, recvbuf[read:]) or_return
+		if n == 0 {
+			return io.Error.Unexpected_EOF
+		}
+	}
+	assert(read == int(to_read) + 2)
+	dns.parse(recvbuf[2:][:to_read], reply) or_return
 
 	return
 }
@@ -207,7 +271,8 @@ send_query :: proc(
 
 	query.header.qd_count = u16be(len(query.qd))
 
-	query_via_udp(ep, &query, &reply) or_return
+//	query_via_udp(ep, &query, &reply) or_return
+	query_via_tcp(ep, &query, &reply) or_return
 
 	if query.header.id != reply.header.id {
 		err = .Bad_Id
