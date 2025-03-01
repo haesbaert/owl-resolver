@@ -25,12 +25,13 @@ Dig_Error :: enum u32 {
 
 Error :: union #shared_nil {
 	Dig_Error,
+	dns.Dns_Error,		/* XXX fixme */
 	dns.Error,
 	dns.Rcode,
 	io.Error,
-	os.Error,
-	net.Network_Error,
 	net.Dial_Error,
+	net.Network_Error,
+	os.Error,
 	posix.Errno,
 	runtime.Allocator_Error,
 }
@@ -81,8 +82,8 @@ wait_readable :: proc(sock: net.Any_Socket) -> (err: Error) {
 
 Resolv_Conf :: struct {
 	nameservers: []net.Address,
-	search: string,
-	options: []string,
+	search:      string,
+	options:     []string,
 }
 
 parse_resolv_dot_conf :: proc(path := "/etc/resolv.conf") -> (rc: Resolv_Conf, err: Error) {
@@ -247,13 +248,7 @@ query_via_tcp :: proc(ep: net.Endpoint, query, reply: ^dns.Packet) -> (err: Erro
 	return
 }
 
-send_query :: proc(
-	name: string,
-	qtype: dns.RR_Type,
-	ep: net.Endpoint,
-) -> (
-	err: Error,
-) {
+send_query :: proc(name: string, qtype: dns.RR_Type, ep: net.Endpoint) -> (err: Error) {
 	query, reply: dns.Packet
 	src: net.Endpoint
 	recvbuf: [2048]byte
@@ -274,8 +269,17 @@ send_query :: proc(
 
 	query.header.qd_count = u16be(len(query.qd))
 
-//	query_via_udp(ep, &query, &reply) or_return
-	query_via_tcp(ep, &query, &reply) or_return
+	err = query_via_udp(ep, &query, &reply)
+	switch err {
+	case nil:
+		break
+	case dns.Dns_Error.Truncated:
+		dns.destroy_packet(&reply)
+		reply = {}
+		query_via_tcp(ep, &query, &reply) or_return
+	case:
+		return
+	}
 
 	if query.header.id != reply.header.id {
 		err = .Bad_Id
