@@ -208,11 +208,10 @@ query_via_tcp :: proc(ep: net.Endpoint, query, reply: ^dns.Packet) -> (err: Erro
 	case n < 2:
 		/* Bail if we couldn't write iov0, too much work to handle */
 		return io.Error.Short_Write
-	case n != (len(sendbuf) + 2):
-		written := n - 2
-		for written < len(sendbuf) {
-			n = net.send(sock, sendbuf[written:]) or_return
-			written += n
+	case n != len(sendbuf) + 2:
+		written := n
+		for written < len(sendbuf) + 2 {
+			written += net.send(sock, sendbuf[written:]) or_return
 		}
 	}
 
