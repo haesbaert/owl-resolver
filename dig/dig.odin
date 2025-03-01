@@ -19,7 +19,6 @@ Dig_Error :: enum u32 {
 	None,
 	Bad_Source_Address,
 	Bad_Id,
-	Bad_Resolv,
 }
 
 Error :: union #shared_nil {
@@ -71,85 +70,6 @@ wait_reply :: proc(sock: net.UDP_Socket) -> (err: Error) {
 	}
 
 	return
-}
-
-Resolv_Conf :: struct {
-	nameservers: []net.Address,
-	search: string,
-	options: []string,
-}
-
-parse_resolv_dot_conf :: proc(path := "/etc/resolv.conf") -> (rc: Resolv_Conf, err: Error) {
-	r: bufio.Reader
-	fd: os.Handle
-	buffer: [1024]byte
-	line: string
-	nameservers: [dynamic]net.Address
-	search: string
-	options: [dynamic]string
-
-	fd = os.open(path) or_return
-	defer os.close(fd)
-	bufio.reader_init_with_buf(&r, os.stream_from_handle(fd), buffer[:])
-	defer bufio.reader_destroy(&r)
-
-	defer if err != nil {
-		delete(nameservers)
-		delete(search)
-		for opt in options {
-			delete(opt)
-		}
-		delete(options)
-	}
-
-	for {
-		line, err = bufio.reader_read_string(&r, '\n')
-		if err == io.Error.EOF {
-			err = nil
-			break
-		}
-		defer delete(line)
-		line = strings.trim_right(line, "\n")
-
-		switch {
-		case strings.starts_with(line, "nameserver "):
-			addr := net.parse_address(line[len("nameserver "):])
-			if addr == nil {
-				err = Dig_Error.Bad_Resolv
-				return
-			}
-			_ = append(&nameservers, addr) or_return
-		case strings.starts_with(line, "search "):
-			search = line[len("search "):]
-			if len(search) == 0 {
-				err = Dig_Error.Bad_Resolv
-				return
-			}
-			search = strings.clone(search) or_return
-		case strings.starts_with(line, "options "):
-			line2 := line[len("options "):]
-			for opt in strings.split_iterator(&line2, " \t") {
-				o := strings.clone(opt) or_return
-				_ = append(&options, o) or_return
-			}
-
-		}
-	}
-
-	rc.nameservers = nameservers[:]
-	rc.search = search
-	rc.options = options[:]
-
-	return
-}
-
-destroy_resolv_conf :: proc(rc: ^Resolv_Conf) {
-	for opt in rc.options {
-		delete(opt)
-	}
-	delete(rc.options)
-	delete(rc.search)
-	delete(rc.nameservers)
 }
 
 send_query :: proc(
