@@ -152,11 +152,38 @@ destroy_resolv_conf :: proc(rc: ^Resolv_Conf) {
 	delete(rc.nameservers)
 }
 
+query_via_udp :: proc(ep: net.Endpoint, query, reply: ^dns.Packet) -> (err: Error) {
+	sock: net.UDP_Socket
+	recvbuf: [2048]byte
+	src: net.Endpoint
+
+	sock = net.make_unbound_udp_socket(.IP4) or_return
+	defer net.close(sock)
+
+	sendbuf := dns.serialize_packet(query) or_return
+	defer delete(sendbuf)
+
+	n := net.send_udp(sock, sendbuf, ep) or_return
+	if n != len(sendbuf) {
+		err = io.Error(.Short_Write)
+		return
+	}
+
+	wait_reply(sock) or_return
+	n, src = net.recv_udp(sock, recvbuf[:]) or_return
+	if src != ep {
+		err = .Bad_Source_Address
+		return
+	}
+	dns.parse(recvbuf[:], reply) or_return
+
+	return
+}
+
 send_query :: proc(
 	name: string,
 	qtype: dns.RR_Type,
 	ep: net.Endpoint,
-	sock: net.UDP_Socket,
 ) -> (
 	err: Error,
 ) {
@@ -180,21 +207,8 @@ send_query :: proc(
 
 	query.header.qd_count = u16be(len(query.qd))
 
-	sendbuf := dns.serialize_packet(&query) or_return
-	defer delete(sendbuf)
-	n := net.send_udp(sock, sendbuf, ep) or_return
-	if n != len(sendbuf) {
-		err = io.Error(.Short_Write)
-		return
-	}
+	query_via_udp(ep, &query, &reply) or_return
 
-	wait_reply(sock) or_return
-	n, src = net.recv_udp(sock, recvbuf[:]) or_return
-	if src != ep {
-		err = .Bad_Source_Address
-		return
-	}
-	dns.parse(recvbuf[:], &reply) or_return
 	if query.header.id != reply.header.id {
 		err = .Bad_Id
 		return
@@ -218,12 +232,9 @@ send_query :: proc(
 }
 
 main_ :: proc(name: string, ep: net.Endpoint) -> (err: Error) {
-	sock := net.make_unbound_udp_socket(.IP4) or_return
-	defer net.close(sock)
-
-	a_err := send_query(name, .A, ep, sock)
-	aaaa_err := send_query(name, .AAAA, ep, sock)
-	mx_err := send_query(name, .MX, ep, sock)
+	a_err := send_query(name, .A, ep)
+	aaaa_err := send_query(name, .AAAA, ep)
+	mx_err := send_query(name, .MX, ep)
 
 	if a_err != nil {
 		fmt.fprintf(os.stderr, "A\t%v\n", a_err)
