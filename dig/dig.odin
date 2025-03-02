@@ -185,7 +185,7 @@ query_via_udp :: proc(ep: net.Endpoint, query, reply: ^dns.Packet) -> (err: Erro
 		err = .Bad_Source_Address
 		return
 	}
-	dns.parse(recvbuf[:], reply) or_return
+	dns.parse(recvbuf[:n], reply) or_return
 
 	return
 }
