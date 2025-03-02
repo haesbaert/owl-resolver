@@ -47,20 +47,7 @@ do_parsing :: proc(t: ^testing.T, buf: []byte) {
 
 domain_equal :: proc {
 	domain_equal_string,
-	domain_equal_domain,
-}
-
-domain_equal_domain :: proc(da, db: dns.Domain_Name) -> bool {
-	if len(da) != len(db) {
-		return false
-	}
-	for d, i in da {
-		if !bytes.equal(d, db[i]) {
-			return false
-		}
-	}
-
-	return true
+	dns.domain_equal,
 }
 
 domain_equal_string :: proc(d: dns.Domain_Name, s: string) -> bool {

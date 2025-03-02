@@ -302,6 +302,10 @@ send_query :: proc(name: string, qtype: dns.RR_Type, ep: net.Endpoint) -> (err: 
 		return
 	}
 	for an in reply.an {
+		if !dns.domain_equal(q.name, an.rr_set.name) {
+			continue
+		}
+
 		#partial switch rr in an.variant {
 		case ^dns.RR_A:
 			fmt.printf("A\t%s\n", net.to_string(net.IP4_Address(rr.addr4)))

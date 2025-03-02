@@ -352,6 +352,19 @@ parse_packet_from_bytes :: proc(buf: []byte, pkt: ^Packet) -> Error {
 	return parse_packet_from_reader(&r, pkt)
 }
 
+domain_equal :: proc(da, db: Domain_Name) -> bool {
+	if len(da) != len(db) {
+		return false
+	}
+	for d, i in da {
+		if !bytes.equal(d, db[i]) {
+			return false
+		}
+	}
+
+	return true
+}
+
 /* XXX doesn't handle escaped dots */
 domain_from_ascii :: proc(s: string, domain: ^Domain_Name) -> (err: Error) {
 	s := s
