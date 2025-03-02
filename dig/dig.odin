@@ -315,10 +315,14 @@ send_query :: proc(name: string, qtype: dns.RR_Type, ep: net.Endpoint) -> (err: 
 	return
 }
 
-main_ :: proc(name: string, resolver: net.Address) -> (err: Error) {
+main_ :: proc(name: string, rc: ^Resolv_Conf) -> (err: Error) {
 	ep: net.Endpoint
 
-	ep.address = resolver
+	if len(rc.nameservers) == 0 {
+		return .Bad_Resolv
+	}
+
+	ep.address = rc.nameservers[0]
 	ep.port = 53
 	a_err := send_query(name, .A, ep)
 	aaaa_err := send_query(name, .AAAA, ep)
@@ -348,6 +352,8 @@ main_ :: proc(name: string, resolver: net.Address) -> (err: Error) {
 
 main :: proc() {
 	resolver: net.Address
+	rc: Resolv_Conf
+	err: Error
 
 	when ODIN_DEBUG {
 		track: mem.Tracking_Allocator
@@ -394,19 +400,23 @@ main :: proc() {
 		usage()
 	}
 
-	if resolver == nil {
-		rc, err := parse_resolv_dot_conf()
+	rc, err = parse_resolv_dot_conf()
+	if err != nil {
+		fatal(err, "")
+	}
+	defer destroy_resolv_conf(&rc)
+
+	/* Overwrite nameserver with -r */
+	if resolver != nil {
+		delete(rc.nameservers)
+		rc.nameservers, err = make([]net.Address, 1)
 		if err != nil {
 			fatal(err, "")
 		}
-		if len(rc.nameservers) == 0 {
-			fatalx("no nameservers in /etc/resolv.conf")
-		}
-		resolver = rc.nameservers[0]
-		destroy_resolv_conf(&rc)
+		rc.nameservers[0] = resolver
 	}
 
-	err := main_(string(pos_args[0]), resolver)
+	err = main_(string(pos_args[0]), &rc)
 	if err != nil {
 		fatal(err, "%s", pos_args[0])
 	}
