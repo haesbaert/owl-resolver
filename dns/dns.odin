@@ -160,9 +160,13 @@ parse_label :: proc(orig_r: ^bytes.Reader, domain: ^Domain_Name) -> Error {
 			if !jumped {
 				to_skip += int(n)
 			}
-			label := packet[cur:][:n]
+			label, err := bytes.clone_safe(packet[cur:][:n])
+			if err != nil {
+				return nil
+			}
 			cur += int(n)
 			if _, err := append(domain, label); err != nil {
+				delete(label)
 				return err
 			}
 			domain_len += len(label) + 1
@@ -357,7 +361,13 @@ domain_from_ascii :: proc(s: string, domain: ^Domain_Name) -> (err: Error) {
 	}
 
 	for l in strings.split_by_byte_iterator(&s, '.') {
-		_ = append(domain, transmute([]byte)l) or_return
+		lcopy := strings.clone(l) or_return
+
+		_, err = append(domain, transmute([]byte)lcopy)
+		if err != nil {
+			delete(lcopy)
+			return
+		}
 	}
 
 	return
@@ -536,6 +546,9 @@ destroy_rr_set :: proc(rr_set: ^RR_Set) {
 }
 
 destroy_domain_name :: proc(domain: ^Domain_Name) {
+	for l in domain^ {
+		delete(l)
+	}
 	delete(domain^)
 	domain^ = nil
 }
