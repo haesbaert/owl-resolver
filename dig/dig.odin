@@ -114,6 +114,8 @@ parse_resolv_dot_conf :: proc(path := "/etc/resolv.conf") -> (rc: Resolv_Conf, e
 		if err == io.Error.EOF {
 			err = nil
 			break
+		} else if err != nil {
+			return
 		}
 		defer delete(line)
 		line = strings.trim_right(line, "\n")
