@@ -16,6 +16,8 @@ import "core:sys/posix"
 
 import dns "../dns"
 
+force_tcp: bool
+
 Dig_Error :: enum u32 {
 	None,
 	Bad_Source_Address,
@@ -56,6 +58,10 @@ fatalx :: proc(s: string, args: ..any) {
 	fmt.fprint(os.stderr, '\n')
 
 	os.exit(1)
+}
+
+usage :: proc() {
+	fatalx("usage: dig [-t] [-r resolver] name")
 }
 
 wait_readable :: proc(sock: net.Any_Socket) -> (err: Error) {
@@ -165,6 +171,10 @@ query_via_udp :: proc(ep: net.Endpoint, query, reply: ^dns.Packet) -> (err: Erro
 	sock: net.UDP_Socket
 	recvbuf: [2048]byte = ---
 	src: net.Endpoint
+
+	if force_tcp {
+		return dns.Dns_Error.Truncated
+	}
 
 	sendbuf := dns.serialize_packet(query) or_return
 	defer delete(sendbuf)
@@ -305,7 +315,11 @@ send_query :: proc(name: string, qtype: dns.RR_Type, ep: net.Endpoint) -> (err: 
 	return
 }
 
-main_ :: proc(name: string, ep: net.Endpoint) -> (err: Error) {
+main_ :: proc(name: string, resolver: net.Address) -> (err: Error) {
+	ep: net.Endpoint
+
+	ep.address = resolver
+	ep.port = 53
 	a_err := send_query(name, .A, ep)
 	aaaa_err := send_query(name, .AAAA, ep)
 	mx_err := send_query(name, .MX, ep)
@@ -333,7 +347,7 @@ main_ :: proc(name: string, ep: net.Endpoint) -> (err: Error) {
 }
 
 main :: proc() {
-	ep: net.Endpoint
+	resolver: net.Address
 
 	when ODIN_DEBUG {
 		track: mem.Tracking_Allocator
@@ -357,29 +371,45 @@ main :: proc() {
 		}
 	}
 
-	switch {
-	case len(os.args) == 2 && os.args[1] == "host":
-		rc, herr := parse_resolv_dot_conf()
-		if herr != nil {
-			fatal(herr, "")
+	arg_loop: for {
+		c := posix.getopt(i32(len(runtime.args__)), raw_data(runtime.args__), "r:t")
+		switch c {
+		case 'r':
+			resolver = net.parse_address(string(posix.optarg))
+			if resolver == nil {
+				usage()
+			}
+		case 't':
+			force_tcp = true
+		case -1:
+			break arg_loop
+		case:
+			usage()
 		}
-		fmt.printf("%#v\n", rc)
-		destroy_resolv_conf(&rc)
-	case len(os.args) == 3:
-		ep.port = 53
-		ep.address = net.parse_address(os.args[1])
-		if ep.address == nil {
-			fatalx("invalid address %s", os.args[1])
-		}
+	}
 
-		err := main_(os.args[2], ep)
+	pos_args := runtime.args__[posix.optind:]
+
+	if len(pos_args) != 1 {
+		usage()
+	}
+
+	if resolver == nil {
+		rc, err := parse_resolv_dot_conf()
 		if err != nil {
-			fatal(err, "%s", os.args[2])
+			fatal(err, "")
 		}
-	case:
-		fatalx("usage: dig forward-addr name")
+		if len(rc.nameservers) == 0 {
+			fatalx("no nameservers in /etc/resolv.conf")
+		}
+		resolver = rc.nameservers[0]
+		destroy_resolv_conf(&rc)
+	}
+
+	err := main_(string(pos_args[0]), resolver)
+	if err != nil {
+		fatal(err, "%s", pos_args[0])
 	}
 
 	free_all(context.temp_allocator)
-	delete(os.args, runtime.default_allocator())
 }
