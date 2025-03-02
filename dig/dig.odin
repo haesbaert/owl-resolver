@@ -315,11 +315,22 @@ send_query :: proc(name: string, qtype: dns.RR_Type, ep: net.Endpoint) -> (err: 
 	return
 }
 
-main_ :: proc(name: string, rc: ^Resolv_Conf) -> (err: Error) {
+main_ :: proc(oname: string, rc: ^Resolv_Conf) -> (err: Error) {
 	ep: net.Endpoint
+	name: string
 
 	if len(rc.nameservers) == 0 {
 		return .Bad_Resolv
+	}
+
+	/* If there are no dots, append search */
+	if dot := strings.index_byte(oname, '.'); dot == -1 && rc.search != "" {
+		name = strings.concatenate([]string{oname, ".", rc.search}) or_return
+	} else {
+		name = oname
+	}
+	defer if name != oname {
+		delete(name)
 	}
 
 	ep.address = rc.nameservers[0]
