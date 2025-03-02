@@ -61,7 +61,7 @@ fatalx :: proc(s: string, args: ..any) {
 }
 
 usage :: proc() {
-	fatalx("usage: dig [-t] [-r resolver] name")
+	fatalx("usage: dig [-T] [-r resolver] name")
 }
 
 wait_readable :: proc(sock: net.Any_Socket) -> (err: Error) {
@@ -372,14 +372,14 @@ main :: proc() {
 	}
 
 	arg_loop: for {
-		c := posix.getopt(i32(len(runtime.args__)), raw_data(runtime.args__), "r:t")
+		c := posix.getopt(i32(len(runtime.args__)), raw_data(runtime.args__), "r:T")
 		switch c {
 		case 'r':
 			resolver = net.parse_address(string(posix.optarg))
 			if resolver == nil {
 				usage()
 			}
-		case 't':
+		case 'T':
 			force_tcp = true
 		case -1:
 			break arg_loop
