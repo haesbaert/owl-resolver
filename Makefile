@@ -1,11 +1,11 @@
 all:
-	odin build dig
+	odin build src/dig
 
 test:
 	odin test tests -all-packages
-	@rm tests.bin
+	@rm -f tests.bin
 
 clean:
-	rm tests.bin dig.bin
+	rm -f tests.bin dig
 
 .PHONY: all clean test
