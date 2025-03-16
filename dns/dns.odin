@@ -352,7 +352,15 @@ parse_packet_from_bytes :: proc(buf: []byte, pkt: ^Packet) -> Error {
 	return parse_packet_from_reader(&r, pkt)
 }
 
-domain_equal :: proc(da, db: Domain_Name) -> bool {
+domain_equal :: proc {
+	domain_equal_domain,
+	domain_equal_string,
+	domain_equal_string1,
+	domain_equal_string2,
+}
+
+@(private)
+domain_equal_domain :: proc(da, db: Domain_Name) -> bool {
 	if len(da) != len(db) {
 		return false
 	}
@@ -363,6 +371,34 @@ domain_equal :: proc(da, db: Domain_Name) -> bool {
 	}
 
 	return true
+}
+
+@(private)
+domain_equal_string :: proc(d: Domain_Name, s: string) -> bool {
+	i: int
+	s := s
+
+	for l in strings.split_by_byte_iterator(&s, '.') {
+		if i == len(d) {
+			return false
+		}
+		if !label_byte_equal(transmute([]byte)l, d[i]) {
+			return false
+		}
+		i += 1
+	}
+
+	return len(d) == i
+}
+
+@(private)
+domain_equal_string1 :: proc(s: string, d: Domain_Name) -> bool {
+	return domain_equal_string(d, s)
+}
+
+@(private)
+domain_equal_string2 :: proc(s1, s2: string) -> bool {
+	return label_byte_equal(transmute([]byte)s1, transmute([]byte)s2)
 }
 
 /* XXX doesn't handle escaped dots */
@@ -384,6 +420,32 @@ domain_from_ascii :: proc(s: string, domain: ^Domain_Name) -> (err: Error) {
 	}
 
 	return
+}
+
+label_byte_equal :: proc(a, b: []byte) -> bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for _, i in a {
+		v1, v2 := a[i], b[i]
+
+		if v1 == v2 {
+			continue
+		}
+		switch v1 {
+		case 'A' ..= 'Z':
+			v1 += 32
+		}
+		switch v2 {
+		case 'A' ..= 'Z':
+			v2 += 32
+		}
+		if v1 != v2 {
+			return false
+		}
+	}
+	return true
 }
 
 serialize_packet :: proc(pkt: ^Packet) -> (buf: []byte, err: Error) {
