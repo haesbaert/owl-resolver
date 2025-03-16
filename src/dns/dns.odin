@@ -53,7 +53,6 @@ parse_u16 :: proc(r: ^bytes.Reader, v: ^u16) -> Error {
 	return nil
 }
 
-/* TODO unify both */
 parse_u32 :: proc(r: ^bytes.Reader, v: ^u32) -> Error {
 	ok: bool
 	v^, ok = endian.get_u32(r.s[r.i:], .Big)
